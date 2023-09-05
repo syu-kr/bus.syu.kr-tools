@@ -15,7 +15,6 @@
  */
 
 import * as fs from 'fs'
-import fetch from 'node-fetch'
 
 interface BusStatusRaw {
   returnCode?: number
@@ -67,48 +66,50 @@ const getTime = (): string => {
   return hours + ':' + minutes + ':' + seconds
 }
 
-const getResponse = async (): Promise<void> => {
-  const time = getDate() + ' ' + getTime()
+const getPrefix = (): string => {
+  return '[' + getDate() + ' ' + getTime() + ']'
+}
 
+const getResponse = async (): Promise<void> => {
   if (new Date().getDay() == 0 || new Date().getDay() == 6) {
-    console.log(time + ' / API data loading failed. Not weekday.')
+    console.log(getPrefix() + ' API data loading failed. Not weekday.')
     return
   }
 
   if (new Date().getHours() < 8 || new Date().getHours() > 19) {
-    console.log(time + ' / API data loading failed. Not time.')
+    console.log(getPrefix() + ' API data loading failed. Not time.')
     return
   }
 
   const config = JSON.parse(fs.readFileSync(__dirname + '/config.json', 'utf8'))
-  const response = await fetch(config['url'], config['options'])
+  const response = await fetch(config.url, config.options)
 
   if (!response.ok) {
-    response.text().then((text) => {
-      throw new Error(text)
-    })
-    console.log(time + ' / API data loading failed. Error.')
+    // response.text().then((text) => {
+    //   throw new Error(text)
+    // })
+    console.log(getPrefix() + ' API data loading failed. Error.')
     return
   }
 
   const rawJson: BusStatusRaw = JSON.parse(JSON.stringify(await response.json()))
   const newJson: Partial<BusStatusNew> = {}
 
-  newJson['time'] = time
-  newJson['returnCode'] = rawJson['returnCode']
-  newJson['data'] = rawJson['data']
+  newJson.time = getDate() + ' ' + getTime()
+  newJson.returnCode = rawJson?.returnCode
+  newJson.data = rawJson?.data
 
-  fs.writeFile('api.json', JSON.stringify(newJson, null, 2), (err) => {
+  fs.writeFile(__dirname + '/api.json', JSON.stringify(newJson, null, 2), (err) => {
     if (err) {
       console.log(err)
     }
   })
 
-  let busNumbers = newJson['data']?.map((element) => {
-    return element['name']
+  let busNumbers = newJson.data?.map((element) => {
+    return element.name
   })
 
-  console.log(time + ' / API [ ' + busNumbers?.join(', ') + ' ] data loading completed.')
+  console.log(getPrefix() + ' API [' + busNumbers?.join(', ') + '] data loading completed.')
 }
 
 setInterval(() => {
