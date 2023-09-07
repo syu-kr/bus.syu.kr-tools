@@ -188,96 +188,98 @@ const getResponse = async (): Promise<void> => {
     return
   }
 
-  const rawJson: BusStatusRaw = JSON.parse(JSON.stringify(await response.json()))
-  //const newJson: Partial<BusStatusNew> = {}
-  const newJson: any = {}
+  try {
+    const rawJson: BusStatusRaw = JSON.parse(JSON.stringify(await response.json()))
+    //const newJson: Partial<BusStatusNew> = {}
+    const newJson: any = {}
 
-  newJson.time = getDate() + ' ' + getTime()
-  newJson.returnCode = rawJson?.returnCode
-  // newJson.data = rawJson?.data
-  newJson.data = rawJson?.data?.map((obj: any) => {
-    obj.busstop = nearBusStop(obj)
-    return obj
-  })
+    newJson.time = getDate() + ' ' + getTime()
+    newJson.returnCode = rawJson?.returnCode
+    // newJson.data = rawJson?.data
+    newJson.data = rawJson?.data?.map((obj: any) => {
+      obj.busstop = nearBusStop(obj)
+      return obj
+    })
 
-  fs.writeFile(__dirname + '/api.json', JSON.stringify(newJson, null, 2), (err) => {
-    if (err) {
-      console.log(err)
-    }
-  })
+    fs.writeFile(__dirname + '/api.json', JSON.stringify(newJson, null, 2), (err) => {
+      if (err) {
+        console.log(err)
+      }
+    })
 
-  const monitorRaw: any = JSON.parse(fs.readFileSync(__dirname + '/monitor.json', 'utf8'))
+    const monitorRaw: any = JSON.parse(fs.readFileSync(__dirname + '/monitor.json', 'utf8'))
 
-  for (let element of newJson.data) {
-    if (monitorRaw[element.name] == undefined) {
-      monitorRaw[element.name] = []
-    }
+    for (let element of newJson.data) {
+      if (monitorRaw[element.name] == undefined) {
+        monitorRaw[element.name] = []
+      }
 
-    let distance = getDistance(busStop[element.busstop], {'lat': element.lat, 'lon': element.lon})
+      let distance = getDistance(busStop[element.busstop], {'lat': element.lat, 'lon': element.lon})
 
-    // if (
-    //   element.name != '석계역' &&
-    //   element.name != '태릉입구역' &&
-    //   element.name != '화랑대역' &&
-    //   element.name != '삼육대'
-    // ) {
-    //   continue
-    // }
+      // if (
+      //   element.name != '석계역' &&
+      //   element.name != '태릉입구역' &&
+      //   element.name != '화랑대역' &&
+      //   element.name != '삼육대'
+      // ) {
+      //   continue
+      // }
 
-    let monitorNew = {
-      // 'lat': element.lat,
-      // 'lon': element.lon,
-      'busstop': element.busstop,
-      'time': getDate() + ' ' + getTime(),
-      'distance': distance,
-    }
+      let monitorNew = {
+        // 'lat': element.lat,
+        // 'lon': element.lon,
+        'busstop': element.busstop,
+        'time': getDate() + ' ' + getTime(),
+        'distance': distance,
+      }
 
-    if (element.status == '0') {
-      continue
-    }
-
-    // if (distance >= 40) {
-    //   continue
-    // }
-
-    // let lastRaw = monitorRaw[element.name].slice(-1)[0]
-    // if (lastRaw != undefined) {
-    //   if (lastRaw.busstop == element.busstop) {
-    //     if (lastRaw.distance < distance) { // 50 < 60
-    //       Array.prototype.pop.call(monitorRaw[element.name])
-    //       console.log(monitorNew)
-    //       continue
-    //     }
-    //   }
-    // }
-
-    console.log(monitorNew)
-
-    if (distance >= 50) {
-      continue
-    }
-
-    let lastRaw = monitorRaw[element.name].slice(-1)[0]
-    if (lastRaw != undefined) {
-      if (lastRaw.busstop == element.busstop) {
+      if (element.status == '0') {
         continue
       }
+
+      // if (distance >= 40) {
+      //   continue
+      // }
+
+      // let lastRaw = monitorRaw[element.name].slice(-1)[0]
+      // if (lastRaw != undefined) {
+      //   if (lastRaw.busstop == element.busstop) {
+      //     if (lastRaw.distance < distance) { // 50 < 60
+      //       Array.prototype.pop.call(monitorRaw[element.name])
+      //       console.log(monitorNew)
+      //       continue
+      //     }
+      //   }
+      // }
+
+      console.log(monitorNew)
+
+      if (distance >= 50) {
+        continue
+      }
+
+      let lastRaw = monitorRaw[element.name].slice(-1)[0]
+      if (lastRaw != undefined) {
+        if (lastRaw.busstop == element.busstop) {
+          continue
+        }
+      }
+
+      Array.prototype.push.call(monitorRaw[element.name], monitorNew)
     }
 
-    Array.prototype.push.call(monitorRaw[element.name], monitorNew)
-  }
+    fs.writeFile(__dirname + '/monitor.json', JSON.stringify(monitorRaw, null, 2), (err) => {
+      if (err) {
+        console.log(err)
+      }
+    })
 
-  fs.writeFile(__dirname + '/monitor.json', JSON.stringify(monitorRaw, null, 2), (err) => {
-    if (err) {
-      console.log(err)
-    }
-  })
+    let busNumbers = newJson.data?.map((element: any) => {
+      return element.name
+    })
 
-  let busNumbers = newJson.data?.map((element: any) => {
-    return element.name
-  })
-
-  console.log(getPrefix() + ' API [' + busNumbers?.join(', ') + '] data loading completed.')
+    console.log(getPrefix() + ' API [' + busNumbers?.join(', ') + '] data loading completed.')
+  } catch {}
 }
 
 setInterval(() => {
