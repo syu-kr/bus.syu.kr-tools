@@ -172,12 +172,14 @@ const dayCount = (d1: string | number | Date, d2: string | number | Date): any =
 }
 
 const getResponse = async (): Promise<void> => {
-  if (new Date().getDay() == 0 || new Date().getDay() == 6) {
+  const newDate = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Seoul'}))
+
+  if (newDate.getDay() == 0 || newDate.getDay() == 6) {
     console.log(getPrefix() + ' API data loading failed. Not weekday.')
     return
   }
 
-  if (new Date().getHours() < 8 || new Date().getHours() > 19) {
+  if (newDate.getHours() < 8 || newDate.getHours() > 19) {
     console.log(getPrefix() + ' API data loading failed. Not time.')
     return
   }
@@ -301,7 +303,9 @@ const getResponse = async (): Promise<void> => {
     })
 
     console.log(getPrefix() + ' API [' + busNumbers?.join(', ') + '] data loading completed.')
-  } catch {}
+  } catch (error) {
+    console.log(error)
+  }
 }
 
 setInterval(() => {
