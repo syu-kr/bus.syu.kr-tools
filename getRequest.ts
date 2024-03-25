@@ -182,18 +182,18 @@ const getResponse = async (): Promise<void> => {
     return
   }
 
-  const config = JSON.parse(fs.readFileSync(__dirname + '/config.json', 'utf8'))
-  const response = await fetch(config.url, config.options)
-
-  if (!response.ok) {
-    // response.text().then((text) => {
-    //   throw new Error(text)
-    // })
-    console.log(getPrefix() + ' API data loading failed. Error.')
-    return
-  }
-
   try {
+    const config = JSON.parse(fs.readFileSync(__dirname + '/config.json', 'utf8'))
+    const response = await fetch(config.url, config.options)
+
+    if (!response.ok) {
+      // response.text().then((text) => {
+      //   throw new Error(text)
+      // })
+      console.log(getPrefix() + ' API data loading failed. Error.')
+      return
+    }
+
     const rawJson: BusStatusRaw = JSON.parse(JSON.stringify(await response.json()))
     //const newJson: Partial<BusStatusNew> = {}
     const newJson: any = {}
