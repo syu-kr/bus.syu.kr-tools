@@ -15,6 +15,9 @@
  */
 
 import * as fs from 'fs'
+import axios from 'axios'
+import {HttpProxyAgent} from 'http-proxy-agent'
+import {HttpsProxyAgent} from 'https-proxy-agent'
 
 interface BusStatusRaw {
   returnCode?: number
@@ -94,27 +97,27 @@ const deg2rad = (deg: any): any => {
 }
 
 const busStop: any = {
-  '삼육대': {
+  삼육대: {
     lat: 37.64349,
     lon: 127.105649,
   },
-  '화랑대역': {
+  화랑대역: {
     lat: 37.619984,
     lon: 127.085462,
   },
-  '태릉입구역': {
+  태릉입구역: {
     lat: 37.617969,
     lon: 127.077054,
   },
-  '석계역': {
+  석계역: {
     lat: 37.615088,
     lon: 127.067217,
   },
-  '별내역': {
+  별내역: {
     lat: 37.642239,
     lon: 127.126747,
   },
-  '월릉교': {
+  월릉교: {
     lat: 37.6162,
     lon: 127.07129,
   },
@@ -122,19 +125,19 @@ const busStop: any = {
     lat: 37.6162,
     lon: 127.07129,
   },
-  '봉화산역': {
+  봉화산역: {
     lat: 37.61745,
     lon: 127.091115,
   },
-  '두산대림아파트': {
+  두산대림아파트: {
     lat: 37.61895,
     lon: 127.087818,
   },
-  '화랑대사거리': {
+  화랑대사거리: {
     lat: 37.62158,
     lon: 127.087228,
   },
-  '경춘선숲길': {
+  경춘선숲길: {
     lat: 37.623846,
     lon: 127.090894,
   },
@@ -142,11 +145,11 @@ const busStop: any = {
     lat: 37.626043,
     lon: 127.09468,
   },
-  '태릉': {
+  태릉: {
     lat: 37.630241,
     lon: 127.098309,
   },
-  '태릉선수촌': {
+  태릉선수촌: {
     lat: 37.633423,
     lon: 127.103218,
   },
@@ -166,6 +169,22 @@ const nearBusStop = (pos: any): any => {
   return Object.keys(sorted)[0]
 }
 
+const dayCount = (d1: string | number | Date, d2: string | number | Date): any => {
+  const date = new Date(d1).getTime() - new Date(d2).getTime()
+  return Math.abs(date / (1000 * 60 * 60 * 24))
+}
+
+const REQUEST_TIMEOUT_MS = 1200
+const POLL_INTERVAL_MS = 1000 * 5
+
+const isValidBusStatusResponse = (payload: any): payload is BusStatusRaw => {
+  if (!payload || typeof payload !== 'object') {
+    return false
+  }
+
+  return Array.isArray(payload.data)
+}
+
 const getResponse = async (): Promise<void> => {
   const newDate = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Seoul'}))
 
@@ -174,24 +193,88 @@ const getResponse = async (): Promise<void> => {
     return
   }
 
-  if (newDate.getHours() < 8 || newDate.getHours() > 19) {
-    console.log(getPrefix() + ' API data loading failed. Not time.')
-    return
-  }
+  // if (newDate.getHours() < 8 || newDate.getHours() > 19) {
+  //   console.log(getPrefix() + ' API data loading failed. Not time.')
+  //   return
+  // }
+
+  const proxyList = [
+    'http://1.231.81.166:3128',
+    'http://150.109.236.146:3128',
+    'http://8.213.151.128:3128',
+  ]
 
   try {
     const config = JSON.parse(fs.readFileSync(__dirname + '/config.json', 'utf8'))
-    const response = await fetch(config.url, config.options)
+    const proxyCandidates = [...proxyList]
+    const isHttpsTarget = String(config._url).startsWith('https://')
+    let response: any = null
+    let lastError: any = null
 
-    if (!response.ok) {
+    for (const proxy of proxyCandidates) {
+      try {
+        const proxyAgent = isHttpsTarget ? new HttpsProxyAgent(proxy) : new HttpProxyAgent(proxy)
+        const abortController = new AbortController()
+        const timeoutId = setTimeout(() => {
+          abortController.abort()
+        }, REQUEST_TIMEOUT_MS)
+
+        const axiosConfig = {
+          ...config.options,
+          url: config._url,
+          method: config.options.method || 'get',
+          httpAgent: proxyAgent,
+          httpsAgent: proxyAgent,
+          timeout: REQUEST_TIMEOUT_MS,
+          signal: abortController.signal,
+          proxy: false,
+        }
+
+        let candidateResponse: any = null
+        try {
+          candidateResponse = await axios(axiosConfig)
+        } finally {
+          clearTimeout(timeoutId)
+        }
+
+        if (!isValidBusStatusResponse(candidateResponse.data)) {
+          throw new Error('Invalid bus API response payload')
+        }
+
+        response = candidateResponse
+        console.log(getPrefix() + ' Proxy connected: ' + proxy)
+        break
+      } catch (error: any) {
+        lastError = error
+        const errorCode =
+          error?.code || (error?.name === 'CanceledError' ? 'HARD_TIMEOUT' : 'UNKNOWN')
+        console.log(getPrefix() + ' Proxy failed: ' + proxy + ' (' + errorCode + ')')
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error('All proxies failed')
+    }
+
+    // axios.get('http://checkip.amazonaws.com', { httpAgent: proxyAgent })
+    // .then(response => {
+    //   console.log('Proxy IP:', response.data);
+    // })
+    // .catch(error => {
+    //   console.error(error);
+    // });
+
+    /*if (!response.ok) {
       // response.text().then((text) => {
       //   throw new Error(text)
       // })
       console.log(getPrefix() + ' API data loading failed. Error.')
       return
-    }
+    }*/
 
-    const rawJson: BusStatusRaw = JSON.parse(JSON.stringify(await response.json()))
+    //const rawJson: BusStatusRaw = JSON.parse(JSON.stringify(await response.json()))
+    const rawJson: BusStatusRaw = response.data
+    console.log(response.data)
     //const newJson: Partial<BusStatusNew> = {}
     const newJson: any = {}
 
@@ -216,7 +299,10 @@ const getResponse = async (): Promise<void> => {
         monitorRaw[element.name] = []
       }
 
-      let distance = getDistance(busStop[element.busstop], {'lat': element.lat, 'lon': element.lon})
+      let distance = getDistance(busStop[element.busstop], {
+        lat: element.lat,
+        lon: element.lon,
+      })
 
       // if (
       //   element.name != '석계역' &&
@@ -230,9 +316,9 @@ const getResponse = async (): Promise<void> => {
       let monitorNew = {
         // 'lat': element.lat,
         // 'lon': element.lon,
-        'busstop': element.busstop,
-        'time': getDate() + ' ' + getTime(),
-        'distance': distance,
+        busstop: element.busstop,
+        time: getDate() + ' ' + getTime(),
+        distance: distance,
       }
 
       if (element.status == '0') {
@@ -276,16 +362,60 @@ const getResponse = async (): Promise<void> => {
       }
     })
 
+    // let newData: any = {};
+    // for (let index in monitorRaw) {
+    //   newData[index] = [];
+    //   for (let info of monitorRaw[index]) {
+    //     if (dayCount(info["time"], new Date()) >= 10) {
+    //       continue;
+    //     }
+    //     newData[index].push(info);
+    //   }
+    // }
+
+    // fs.writeFile(
+    //   __dirname + "/monitor-convert.json",
+    //   JSON.stringify(newData, null, 2),
+    //   (err) => {
+    //     if (err) {
+    //       console.log(err);
+    //     }
+    //   },
+    // );
+
     let busNumbers = newJson.data?.map((element: any) => {
       return element.name
     })
 
     console.log(getPrefix() + ' API [' + busNumbers?.join(', ') + '] data loading completed.')
-  } catch (error) {
-    console.log(error)
+  } catch (error: any) {
+    if (axios.isAxiosError(error)) {
+      const code = error.code || 'UNKNOWN'
+      const status = error.response?.status
+      const brief =
+        getPrefix() +
+        ' Request failed (' +
+        code +
+        (status ? '/' + status : '') +
+        '): ' +
+        (error.message || 'Axios error')
+      console.log(brief)
+    } else if (error instanceof Error) {
+      console.log(getPrefix() + ' Request failed: ' + error.message)
+    } else {
+      console.log(getPrefix() + ' Request failed: Unknown error')
+    }
   }
 }
 
-setInterval(() => {
-  getResponse()
-}, 1000 * 2)
+const runPoll = async (): Promise<void> => {
+  try {
+    await getResponse()
+  } finally {
+    setTimeout(() => {
+      void runPoll()
+    }, POLL_INTERVAL_MS)
+  }
+}
+
+void runPoll()
