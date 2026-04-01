@@ -18,6 +18,7 @@ import * as fs from 'fs'
 import axios from 'axios'
 import {HttpProxyAgent} from 'http-proxy-agent'
 import {HttpsProxyAgent} from 'https-proxy-agent'
+const {SocksProxyAgent} = require('socks-proxy-agent')
 
 interface BusStatusRaw {
   returnCode?: number
@@ -174,8 +175,8 @@ const dayCount = (d1: string | number | Date, d2: string | number | Date): any =
   return Math.abs(date / (1000 * 60 * 60 * 24))
 }
 
-const REQUEST_TIMEOUT_MS = 1200
-const POLL_INTERVAL_MS = 1000 * 5
+const REQUEST_TIMEOUT_MS = 1000 * 2
+const POLL_INTERVAL_MS = 1000 * 6
 
 const isValidBusStatusResponse = (payload: any): payload is BusStatusRaw => {
   if (!payload || typeof payload !== 'object') {
@@ -193,15 +194,16 @@ const getResponse = async (): Promise<void> => {
     return
   }
 
-  // if (newDate.getHours() < 8 || newDate.getHours() > 19) {
-  //   console.log(getPrefix() + ' API data loading failed. Not time.')
-  //   return
-  // }
+  if (newDate.getHours() < 8 || newDate.getHours() > 19) {
+    console.log(getPrefix() + ' API data loading failed. Not time.')
+    return
+  }
 
   const proxyList = [
-    'http://1.231.81.166:3128',
+    'http://183.110.216.159:8091',
+    'http://219.249.37.107:8382',
     'http://150.109.236.146:3128',
-    'http://8.213.151.128:3128',
+    'socks5://121.169.46.116:1090',
   ]
 
   try {
@@ -213,7 +215,12 @@ const getResponse = async (): Promise<void> => {
 
     for (const proxy of proxyCandidates) {
       try {
-        const proxyAgent = isHttpsTarget ? new HttpsProxyAgent(proxy) : new HttpProxyAgent(proxy)
+        let proxyAgent: any
+        if (proxy.startsWith('socks5://')) {
+          proxyAgent = new SocksProxyAgent(proxy)
+        } else {
+          proxyAgent = isHttpsTarget ? new HttpsProxyAgent(proxy) : new HttpProxyAgent(proxy)
+        }
         const abortController = new AbortController()
         const timeoutId = setTimeout(() => {
           abortController.abort()
