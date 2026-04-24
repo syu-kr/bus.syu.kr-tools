@@ -175,7 +175,7 @@ const dayCount = (d1: string | number | Date, d2: string | number | Date): any =
   return Math.abs(date / (1000 * 60 * 60 * 24))
 }
 
-const REQUEST_TIMEOUT_MS = 1000 * 2
+const REQUEST_TIMEOUT_MS = 1000 * 5
 const POLL_INTERVAL_MS = 1000 * 6
 
 const isValidBusStatusResponse = (payload: any): payload is BusStatusRaw => {
@@ -194,21 +194,14 @@ const getResponse = async (): Promise<void> => {
     return
   }
 
-  if (newDate.getHours() < 8 || newDate.getHours() > 19) {
+  if (newDate.getHours() < 8 || newDate.getHours() >= 19) {
     console.log(getPrefix() + ' API data loading failed. Not time.')
     return
   }
 
-  const proxyList = [
-    'http://183.110.216.159:8091',
-    'http://219.249.37.107:8382',
-    'http://150.109.236.146:3128',
-    'socks5://121.169.46.116:1090',
-  ]
-
   try {
     const config = JSON.parse(fs.readFileSync(__dirname + '/config.json', 'utf8'))
-    const proxyCandidates = [...proxyList]
+    const proxyCandidates = Array.isArray(config.proxyList) ? [...config.proxyList] : []
     const isHttpsTarget = String(config._url).startsWith('https://')
     let response: any = null
     let lastError: any = null
