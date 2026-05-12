@@ -175,7 +175,7 @@ const dayCount = (d1: string | number | Date, d2: string | number | Date): any =
   return Math.abs(date / (1000 * 60 * 60 * 24))
 }
 
-const REQUEST_TIMEOUT_MS = 1000 * 5
+const REQUEST_TIMEOUT_MS = 1000 * 3
 const POLL_INTERVAL_MS = 1000 * 6
 
 const isValidBusStatusResponse = (payload: any): payload is BusStatusRaw => {
@@ -186,34 +186,27 @@ const isValidBusStatusResponse = (payload: any): payload is BusStatusRaw => {
   return Array.isArray(payload.data)
 }
 
-const getResponse = async (): Promise<void> => {
+const getResponse = async (): Promise<number> => {
   const newDate = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Seoul'}))
 
   if (newDate.getDay() == 0 || newDate.getDay() == 6) {
     console.log(getPrefix() + ' API data loading failed. Not weekday.')
-    return
+    return POLL_INTERVAL_MS
   }
 
-  if (newDate.getHours() < 8 || newDate.getHours() >= 19) {
+  if (newDate.getHours() < 12 || newDate.getHours() >= 19) {
     console.log(getPrefix() + ' API data loading failed. Not time.')
-    return
+    return POLL_INTERVAL_MS
   }
 
   try {
     const config = JSON.parse(fs.readFileSync(__dirname + '/config.json', 'utf8'))
-    const proxyCandidates = Array.isArray(config.proxyList) ? [...config.proxyList] : []
     const isHttpsTarget = String(config._url).startsWith('https://')
     let response: any = null
     let lastError: any = null
 
-    for (const proxy of proxyCandidates) {
+    if (config.mode === 'local') {
       try {
-        let proxyAgent: any
-        if (proxy.startsWith('socks5://')) {
-          proxyAgent = new SocksProxyAgent(proxy)
-        } else {
-          proxyAgent = isHttpsTarget ? new HttpsProxyAgent(proxy) : new HttpProxyAgent(proxy)
-        }
         const abortController = new AbortController()
         const timeoutId = setTimeout(() => {
           abortController.abort()
@@ -223,11 +216,8 @@ const getResponse = async (): Promise<void> => {
           ...config.options,
           url: config._url,
           method: config.options.method || 'get',
-          httpAgent: proxyAgent,
-          httpsAgent: proxyAgent,
           timeout: REQUEST_TIMEOUT_MS,
           signal: abortController.signal,
-          proxy: false,
         }
 
         let candidateResponse: any = null
@@ -242,18 +232,74 @@ const getResponse = async (): Promise<void> => {
         }
 
         response = candidateResponse
-        console.log(getPrefix() + ' Proxy connected: ' + proxy)
-        break
+        console.log(getPrefix() + ' Local request succeeded')
       } catch (error: any) {
         lastError = error
         const errorCode =
           error?.code || (error?.name === 'CanceledError' ? 'HARD_TIMEOUT' : 'UNKNOWN')
-        console.log(getPrefix() + ' Proxy failed: ' + proxy + ' (' + errorCode + ')')
+        console.log(getPrefix() + ' Local request failed (' + errorCode + ')')
+      }
+    } else {
+      const proxyCandidates = Array.isArray(config.proxyList) ? [...config.proxyList] : []
+
+      for (const proxy of proxyCandidates) {
+        try {
+          let proxyAgent: any
+          if (proxy.startsWith('socks')) {
+            proxyAgent = new SocksProxyAgent(proxy)
+          } else {
+            proxyAgent = isHttpsTarget ? new HttpsProxyAgent(proxy) : new HttpProxyAgent(proxy)
+          }
+          const proxyUrl = new URL(proxy)
+          const abortController = new AbortController()
+          const timeoutId = setTimeout(() => {
+            abortController.abort()
+          }, REQUEST_TIMEOUT_MS)
+
+          const axiosConfig = {
+            ...config.options,
+            url: config._url,
+            method: config.options.method || 'get',
+            // proxy: {
+            //   protocol: proxyUrl.protocol.replace(':', ''),
+            //   host: proxyUrl.hostname,
+            //   port: Number(proxyUrl.port),
+            // },
+            httpAgent: proxyAgent,
+            httpsAgent: proxyAgent,
+            timeout: REQUEST_TIMEOUT_MS,
+            signal: abortController.signal,
+          }
+
+          let candidateResponse: any = null
+          try {
+            candidateResponse = await axios(axiosConfig)
+          } finally {
+            clearTimeout(timeoutId)
+          }
+
+          if (!isValidBusStatusResponse(candidateResponse.data)) {
+            throw new Error('Invalid bus API response payload')
+          }
+
+          response = candidateResponse
+          // console.log(candidateResponse.request?._header)
+          console.log(getPrefix() + ' Proxy connected: ' + proxy)
+          break
+        } catch (error: any) {
+          lastError = error
+          const errorCode =
+            error?.code || (error?.name === 'CanceledError' ? 'HARD_TIMEOUT' : 'UNKNOWN')
+          console.log(getPrefix() + ' Proxy failed: ' + proxy + ' (' + errorCode + ')')
+        }
       }
     }
 
     if (!response) {
-      throw lastError || new Error('All proxies failed')
+      throw (
+        lastError ||
+        new Error(config.mode === 'local' ? 'Local request failed' : 'All proxies failed')
+      )
     }
 
     // axios.get('http://checkip.amazonaws.com', { httpAgent: proxyAgent })
@@ -292,7 +338,13 @@ const getResponse = async (): Promise<void> => {
       }
     })
 
-    let monitorRaw: any = JSON.parse(fs.readFileSync(__dirname + '/monitor.json', 'utf8'))
+    let monitorRaw: any = {}
+    try {
+      const monitorContent = fs.readFileSync(__dirname + '/monitor.json', 'utf8')
+      if (monitorContent.trim()) {
+        monitorRaw = JSON.parse(monitorContent)
+      }
+    } catch (e) {}
 
     for (let element of newJson.data) {
       if (monitorRaw[element.name] == undefined) {
@@ -388,6 +440,7 @@ const getResponse = async (): Promise<void> => {
     })
 
     console.log(getPrefix() + ' API [' + busNumbers?.join(', ') + '] data loading completed.')
+    return POLL_INTERVAL_MS
   } catch (error: any) {
     if (axios.isAxiosError(error)) {
       const code = error.code || 'UNKNOWN'
@@ -405,13 +458,31 @@ const getResponse = async (): Promise<void> => {
     } else {
       console.log(getPrefix() + ' Request failed: Unknown error')
     }
+    const isCanceledError =
+      (axios.isAxiosError(error) &&
+        (error.name === 'CanceledError' || error.code === 'ECONNABORTED')) ||
+      error?.name === 'CanceledError' ||
+      (error &&
+        typeof error.message === 'string' &&
+        error.message.toLowerCase().includes('canceled'))
+
+    if (isCanceledError) {
+      console.log(getPrefix() + ' Request was canceled — retrying immediately.')
+      return 0
+    }
+
+    return POLL_INTERVAL_MS
   }
 }
 
 const runPoll = async (): Promise<void> => {
   try {
-    await getResponse()
-  } finally {
+    const delayMs = await getResponse()
+    const delay = typeof delayMs === 'number' ? delayMs : POLL_INTERVAL_MS
+    setTimeout(() => {
+      void runPoll()
+    }, delay)
+  } catch (e) {
     setTimeout(() => {
       void runPoll()
     }, POLL_INTERVAL_MS)
